@@ -1,2 +1,6 @@
-fastapi[standard]
-openai==1.102.0
+azure-storage-blob
+fastapi
+matplotlib
+openai
+pytest
+uvicorn
