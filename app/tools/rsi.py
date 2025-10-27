@@ -4,7 +4,7 @@ from typing import List
 
 from app.services.models import ToolResult
 from app.services.preprocess import PriceMatrix
-from app.services.visuals import build_line_chart_svg
+from app.services.visuals import figure_to_url, plot_lines
 
 
 def _compute_rsi(prices: List[float], period: int = 14) -> List[float]:
@@ -53,13 +53,14 @@ def analyze_rsi(data: PriceMatrix, period: int = 14) -> ToolResult:
         summaries.append(f"{ticker}: {state} (RSI {latest:.1f})")
         series_map[ticker] = rsi_values
 
-    image = build_line_chart_svg(
+    figure = plot_lines(
         dates=[date.isoformat() for date in data.dates],
         series_map=series_map,
         title=f"{period}-Period RSI",
         y_label="RSI",
         horizontal_lines=[(70, "#d62728"), (30, "#2ca02c")],
     )
+    image_url = figure_to_url(figure)
 
     summary = "; ".join(summaries)
-    return ToolResult(name="rsi", summary=summary, images=[image])
+    return ToolResult(name="rsi", summary=summary, images=[image_url])

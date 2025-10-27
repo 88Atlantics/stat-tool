@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import datetime as dt
+import io
 from dataclasses import dataclass
 from typing import Dict, Iterable, List
 
@@ -72,3 +74,48 @@ def clean_stock_data(records: Iterable[RawRecord]) -> PriceMatrix:
     }
 
     return PriceMatrix(dates=filtered_dates, series=filtered_series)
+
+
+def parse_uploaded_prices(content: bytes, filename: str | None = None) -> List[RawRecord]:
+    if not content:
+        return []
+
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1", errors="ignore")
+
+    dialect = csv.excel
+    if text.strip():
+        sample = "\n".join(text.splitlines()[:2])
+        try:
+            dialect = csv.Sniffer().sniff(sample)
+        except Exception:
+            pass
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+    records: List[RawRecord] = []
+    for row in reader:
+        date_value = row.get("Date") or row.get("date")
+        ticker_value = row.get("Ticker") or row.get("ticker")
+        close_value = row.get("Close") or row.get("close") or row.get("Adj Close")
+        if not date_value or not ticker_value or close_value in (None, ""):
+            continue
+        records.append({"Date": date_value, "Ticker": ticker_value, "Close": close_value})
+
+    if not records and filename and filename.lower().endswith(".json"):
+        try:
+            import json
+
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, dict):
+                        date_value = item.get("Date") or item.get("date")
+                        ticker_value = item.get("Ticker") or item.get("ticker")
+                        close_value = item.get("Close") or item.get("close")
+                        if date_value and ticker_value and close_value is not None:
+                            records.append({"Date": date_value, "Ticker": ticker_value, "Close": close_value})
+        except Exception:
+            return []
+
+    return records

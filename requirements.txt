@@ -1,3 +1,6 @@
+azure-storage-blob
 fastapi
+matplotlib
+openai
 pytest
 uvicorn

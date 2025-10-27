@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Optional
+import json
+from typing import Optional, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from app.services.agent import AgentService
-from app.services.preprocess import PriceMatrix, clean_stock_data
+from app.services.preprocess import PriceMatrix, clean_stock_data, parse_uploaded_prices
 from app.services.sources import load_market_data
 
 router = APIRouter()
@@ -58,8 +59,31 @@ agent_service = AgentService()
 
 
 @router.post("/", response_model=AnalysisResponse)
-async def run_analysis(request: AnalysisRequest) -> AnalysisResponse:
+async def run_analysis(
+    http_request: Request,
+    request_payload: Optional[str] = Form(
+        default=None, description="JSON payload for the analysis request"
+    ),
+    upload_file: Union[UploadFile, str, None] = File(
+        None, description="optional file upload"
+    ),
+) -> AnalysisResponse:
+    if request_payload is not None:
+        try:
+            request_dict = json.loads(request_payload)
+        except json.JSONDecodeError as exc:  # pragma: no cover - invalid client payload
+            raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}")
+    else:
+        try:
+            request_dict = await http_request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}")
+
+    request = AnalysisRequest.model_validate(request_dict)
     raw_records: list[dict[str, object]] = []
+    if isinstance(upload_file, UploadFile):
+        file_bytes = await upload_file.read()
+        raw_records.extend(parse_uploaded_prices(file_bytes, upload_file.filename))
     if request.uploaded_data:
         for ticker in request.uploaded_data:
             for record in ticker.records:
@@ -70,7 +94,7 @@ async def run_analysis(request: AnalysisRequest) -> AnalysisResponse:
                         "Close": record.close,
                     }
                 )
-    elif request.tickers:
+    if not raw_records and request.tickers:
         raw_records = load_market_data(
             tickers=request.tickers,
             start=request.start_date,
@@ -78,7 +102,7 @@ async def run_analysis(request: AnalysisRequest) -> AnalysisResponse:
         )
         if not raw_records:
             raise HTTPException(status_code=404, detail="No market data available for the requested tickers")
-    else:
+    if not raw_records:
         raise HTTPException(status_code=400, detail="Provide either tickers or uploaded_data")
 
     cleaned: PriceMatrix = clean_stock_data(raw_records)
