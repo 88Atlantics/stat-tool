@@ -1,2 +1,3 @@
-fastapi[standard]
-openai==1.102.0
+fastapi
+pytest
+uvicorn
