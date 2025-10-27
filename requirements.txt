@@ -1,5 +1,6 @@
 azure-storage-blob
 fastapi
+httpx
 matplotlib
 openai
 pytest

@@ -2,6 +2,10 @@ import datetime as dt
 import pathlib
 import sys
 
+import pytest
+
+pytest.importorskip("httpx")
+
 from fastapi.testclient import TestClient
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -13,25 +17,26 @@ from app.main import app
 client = TestClient(app)
 
 
-def _sample_upload_payload():
+def _sample_csv_payload() -> str:
     base_date = dt.date(2024, 1, 1)
-    records = []
+    rows = ["Date,Ticker,Close"]
     for i in range(30):
-        records.append({"date": (base_date + dt.timedelta(days=i)).isoformat(), "close": 100 + i})
-    inverse_records = []
-    for i in range(30):
-        inverse_records.append({"date": (base_date + dt.timedelta(days=i)).isoformat(), "close": 120 - i})
-    return {
-        "query": "Please run zscore, rsi and sma analysis",
-        "uploaded_data": [
-            {"symbol": "AAA", "records": records},
-            {"symbol": "BBB", "records": inverse_records},
-        ],
-    }
+        rows.append(
+            f"{(base_date + dt.timedelta(days=i)).isoformat()},AAA,{100 + i}"
+        )
+        rows.append(
+            f"{(base_date + dt.timedelta(days=i)).isoformat()},BBB,{120 - i}"
+        )
+    return "\n".join(rows)
 
 
 def test_analysis_endpoint_returns_results():
-    response = client.post("/analysis/", json=_sample_upload_payload())
+    csv_payload = _sample_csv_payload()
+    response = client.post(
+        "/analysis/",
+        data={"query": "Please run zscore, rsi and sma analysis"},
+        files={"upload_file": ("prices.csv", csv_payload, "text/csv")},
+    )
     assert response.status_code == 200
     body = response.json()
     assert "analysis" in body
@@ -41,5 +46,5 @@ def test_analysis_endpoint_returns_results():
 
 
 def test_missing_data_returns_error():
-    response = client.post("/analysis/", json={"query": "test"})
+    response = client.post("/analysis/", data={"query": "test"})
     assert response.status_code == 400
