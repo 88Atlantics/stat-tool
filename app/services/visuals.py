@@ -4,6 +4,7 @@ import base64
 import io
 import os
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 from uuid import uuid4
@@ -14,10 +15,12 @@ try:  # pragma: no cover - matplotlib optional during testing
     import matplotlib
 
     matplotlib.use("Agg")
+    import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
 except ImportError:  # pragma: no cover - fallback when matplotlib missing
     matplotlib = None  # type: ignore[assignment]
     plt = None  # type: ignore[assignment]
+    mdates = None  # type: ignore[assignment]
 
 try:  # pragma: no cover - optional dependency in tests
     from azure.storage.blob import BlobServiceClient, ContentSettings
@@ -136,8 +139,22 @@ def plot_lines(
             {"payload": f"{title}: {readable} (plot unavailable)"},
         )()
     fig, ax = plt.subplots(figsize=(10, 4))
+    plotted_dates: Sequence[object] = list(dates)
+    use_date_formatting = False
+    if dates:
+        first_date = dates[0]
+        if isinstance(first_date, (datetime, date)):
+            use_date_formatting = True
+        elif isinstance(first_date, str):
+            try:
+                parsed = [datetime.fromisoformat(item) for item in dates]
+            except ValueError:
+                parsed = None
+            else:
+                plotted_dates = parsed
+                use_date_formatting = True
     for label, series in series_map.items():
-        ax.plot(dates, series, label=label)
+        ax.plot(plotted_dates, series, label=label)
     ax.set_title(title)
     ax.set_ylabel(y_label)
     ax.set_xlabel("Date")
@@ -146,6 +163,13 @@ def plot_lines(
             ax.axhline(y=value, color=color, linestyle="--", linewidth=1)
     if len(series_map) > 1:
         ax.legend()
-    fig.autofmt_xdate(rotation=45)
+    if use_date_formatting and mdates is not None:
+        locator = mdates.AutoDateLocator()
+        formatter = mdates.ConciseDateFormatter(locator)
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(formatter)
+        fig.autofmt_xdate()
+    else:
+        fig.autofmt_xdate(rotation=45)
     fig.tight_layout()
     return fig
