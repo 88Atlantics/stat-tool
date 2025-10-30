@@ -36,7 +36,7 @@ class VisualConfig:
     def from_env(cls) -> "VisualConfig":
         return cls(
             connection_string=os.getenv("AZURE_BLOB_CONNECTION_STRING"),
-            container_name=os.getenv("AZURE_BLOB_CONTAINER"),
+            container_name=os.getenv("AZURE_BLOB_CONTAINER_NAME"),
             static_base_url=os.getenv("PUBLIC_STATIC_BASE_URL"),
         )
 
