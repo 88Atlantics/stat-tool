@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import base64
 import io
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 from urllib.parse import quote
+from uuid import uuid4
 
 try:  # pragma: no cover - matplotlib optional during testing
     import matplotlib
@@ -27,12 +28,14 @@ except ImportError:  # pragma: no cover - optional dependency in tests
 class VisualConfig:
     connection_string: str | None
     container_name: str | None
+    static_base_url: str | None
 
     @classmethod
     def from_env(cls) -> "VisualConfig":
         return cls(
             connection_string=os.getenv("AZURE_BLOB_CONNECTION_STRING"),
             container_name=os.getenv("AZURE_BLOB_CONTAINER"),
+            static_base_url=os.getenv("PUBLIC_STATIC_BASE_URL"),
         )
 
 
@@ -65,6 +68,22 @@ def _upload_to_azure(content: bytes, config: VisualConfig) -> str | None:
     return blob_client.url  # type: ignore[return-value]
 
 
+def _store_local(content: bytes, static_base_url: str | None) -> str | None:
+    static_root = Path(__file__).resolve().parents[1] / "static"
+    visuals_dir = static_root / "visuals"
+    try:
+        visuals_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid4().hex}.png"
+        file_path = visuals_dir / filename
+        file_path.write_bytes(content)
+    except OSError:
+        return None
+    relative_path = f"/static/visuals/{filename}"
+    if static_base_url:
+        return f"{static_base_url.rstrip('/')}{relative_path}"
+    return relative_path
+
+
 def figure_to_url(fig, config: VisualConfig | None = None) -> str:
     cfg = config or VisualConfig.from_env()
     if plt is None or not hasattr(fig, "savefig"):
@@ -74,8 +93,11 @@ def figure_to_url(fig, config: VisualConfig | None = None) -> str:
     azure_url = _upload_to_azure(png_bytes, cfg)
     if azure_url:
         return azure_url
-    base64_image = base64.b64encode(png_bytes).decode("utf-8")
-    return f"data:image/png;base64,{base64_image}"
+    local_url = _store_local(png_bytes, cfg.static_base_url)
+    if local_url:
+        return local_url
+    text = getattr(fig, "payload", "Chart unavailable")
+    return f"data:text/plain;charset=utf-8,{quote(str(text))}"
 
 
 def plot_heatmap(matrix: Sequence[Sequence[float]], labels: Sequence[str], title: str):
