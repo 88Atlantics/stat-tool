@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import base64
 import io
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
-from urllib.parse import quote
 from uuid import uuid4
+
+from app.services.models import ImagePayload
 
 try:  # pragma: no cover - matplotlib optional during testing
     import matplotlib
@@ -43,7 +45,7 @@ def _figure_to_png_bytes(fig) -> bytes:
     if plt is None or not hasattr(fig, "savefig"):
         raise RuntimeError("Matplotlib is not available")
     buffer = io.BytesIO()
-    fig.savefig(buffer, format="png", bbox_inches="tight")
+    fig.savefig(buffer, format="png", bbox_inches="tight", facecolor="white")
     plt.close(fig)
     buffer.seek(0)
     return buffer.read()
@@ -84,20 +86,21 @@ def _store_local(content: bytes, static_base_url: str | None) -> str | None:
     return relative_path
 
 
-def figure_to_url(fig, config: VisualConfig | None = None) -> str:
+def figure_to_payload(fig, config: VisualConfig | None = None) -> ImagePayload:
     cfg = config or VisualConfig.from_env()
     if plt is None or not hasattr(fig, "savefig"):
         text = getattr(fig, "payload", "Chart unavailable")
-        return f"data:text/plain;charset=utf-8,{quote(str(text))}"
+        encoded = base64.b64encode(str(text).encode("utf-8")).decode("ascii")
+        return ImagePayload(content_type="text/plain", encoding="base64", data=encoded)
     png_bytes = _figure_to_png_bytes(fig)
     azure_url = _upload_to_azure(png_bytes, cfg)
     if azure_url:
-        return azure_url
+        return ImagePayload(content_type="image/png", encoding="url", data=azure_url)
     local_url = _store_local(png_bytes, cfg.static_base_url)
     if local_url:
-        return local_url
-    text = getattr(fig, "payload", "Chart unavailable")
-    return f"data:text/plain;charset=utf-8,{quote(str(text))}"
+        return ImagePayload(content_type="image/png", encoding="url", data=local_url)
+    encoded_png = base64.b64encode(png_bytes).decode("ascii")
+    return ImagePayload(content_type="image/png", encoding="base64", data=encoded_png)
 
 
 def plot_heatmap(matrix: Sequence[Sequence[float]], labels: Sequence[str], title: str):
