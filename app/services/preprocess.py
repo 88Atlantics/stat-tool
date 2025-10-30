@@ -83,6 +83,81 @@ def _derive_ticker_from_filename(filename: str) -> str | None:
     return candidate.upper() if candidate else None
 
 
+def _parse_matrix_layout(
+    rows: List[List[str]], fallback_symbol: str | None
+) -> List[RawRecord]:
+    if not rows:
+        return []
+
+    # Normalise rows by trimming whitespace and removing empties
+    normalized_rows: List[List[str]] = []
+    for row in rows:
+        cleaned = [cell.strip() for cell in row]
+        if any(cell for cell in cleaned):
+            normalized_rows.append(cleaned)
+
+    if not normalized_rows:
+        return []
+
+    header_row = normalized_rows[0]
+    ticker_row = normalized_rows[1] if len(normalized_rows) > 1 else []
+
+    date_row_index = None
+    for idx, row in enumerate(normalized_rows):
+        if row and row[0].lower() == "date":
+            date_row_index = idx
+            break
+
+    if date_row_index is None or date_row_index + 1 >= len(normalized_rows):
+        return []
+
+    column_labels = header_row[1:] if len(header_row) > 1 else []
+    close_index = None
+    for idx, label in enumerate(column_labels, start=1):
+        lowered = label.lower()
+        if lowered in {"close", "adj close", "price", "close price", "last"}:
+            close_index = idx
+            break
+
+    if close_index is None and column_labels:
+        close_index = 1
+
+    derived_ticker = fallback_symbol
+    if not derived_ticker:
+        if close_index is not None and len(ticker_row) > close_index:
+            candidate = ticker_row[close_index]
+            if candidate:
+                derived_ticker = candidate.upper()
+        if not derived_ticker:
+            for cell in ticker_row[1:]:
+                if cell:
+                    derived_ticker = cell.upper()
+                    break
+
+    if not derived_ticker:
+        return []
+
+    data_rows = normalized_rows[date_row_index + 1 :]
+    parsed: List[RawRecord] = []
+    for row in data_rows:
+        if not row or not row[0]:
+            continue
+        date_value = row[0]
+        close_value = None
+        if close_index is not None and len(row) > close_index and row[close_index]:
+            close_value = row[close_index]
+        else:
+            for cell in row[1:]:
+                if cell:
+                    close_value = cell
+                    break
+        if not close_value:
+            continue
+        parsed.append({"Date": date_value, "Ticker": derived_ticker, "Close": close_value})
+
+    return parsed
+
+
 def parse_uploaded_prices(
     content: bytes,
     filename: str | None = None,
@@ -133,7 +208,15 @@ def parse_uploaded_prices(
             }
         )
 
-    if not records and filename and filename.lower().endswith(".json"):
+    if records:
+        return records
+
+    structured_rows = list(csv.reader(io.StringIO(text)))
+    matrix_records = _parse_matrix_layout(structured_rows, fallback_symbol)
+    if matrix_records:
+        return matrix_records
+
+    if filename and filename.lower().endswith(".json"):
         try:
             import json
 

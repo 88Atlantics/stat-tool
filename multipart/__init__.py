@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from .multipart import MultipartParser, parse_options_header
-from .exceptions import MultipartError
+from .parser import MultipartParser, MultipartParseError, parse_options_header
 
 __all__ = [
     "MultipartParser",
+    "MultipartParseError",
     "parse_options_header",
-    "MultipartError",
     "__version__",
 ]
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

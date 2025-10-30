@@ -47,16 +47,23 @@ def _invoke_run_analysis(
     query: str,
     *,
     csv_payload: str | None = None,
+    upload_bytes: bytes | None = None,
     tickers: str | None = None,
     start: str | None = None,
     end: str | None = None,
+    filename: str = "upload.csv",
 ):
     upload: UploadFile | None = None
+    payload_bytes: bytes | None = None
+    if csv_payload is not None and upload_bytes is not None:
+        raise ValueError("Provide either csv_payload or upload_bytes, not both")
     if csv_payload is not None:
-        upload = UploadFile(
-            filename="upload.csv",
-            file=io.BytesIO(csv_payload.encode("utf-8")),
-        )
+        payload_bytes = csv_payload.encode("utf-8")
+    elif upload_bytes is not None:
+        payload_bytes = upload_bytes
+
+    if payload_bytes is not None:
+        upload = UploadFile(filename=filename, file=io.BytesIO(payload_bytes))
     return asyncio.run(
         analysis.run_analysis(
             query=query,
@@ -88,6 +95,21 @@ def test_missing_data_returns_error():
 def test_uploaded_file_without_ticker_is_used():
     csv_payload = _csv_without_ticker()
     result = _invoke_run_analysis("苹果过去六个月的sma", csv_payload=csv_payload)
+    assert "sma" in result.tool_summaries
+    assert result.images["sma"]
+
+
+def test_real_aapl_csv_is_parsed():
+    csv_path = pathlib.Path(__file__).with_name("AAPL.csv")
+    payload = csv_path.read_bytes()
+    result = _invoke_run_analysis(
+        "AAPL past six months sma",
+        upload_bytes=payload,
+        tickers="AAPL",
+        start="2020-01-02",
+        end="2020-06-30",
+        filename="AAPL.csv",
+    )
     assert "sma" in result.tool_summaries
     assert result.images["sma"]
 
