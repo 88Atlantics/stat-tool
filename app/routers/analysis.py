@@ -26,10 +26,16 @@ class AnalysisRequest(BaseModel):
     )
 
 
+class ImageResponse(BaseModel):
+    content_type: str
+    encoding: str
+    data: str
+
+
 class AnalysisResponse(BaseModel):
     analysis: str
     tool_summaries: dict[str, str]
-    images: dict[str, list[str]]
+    images: dict[str, list[ImageResponse]]
 
 
 agent_service = AgentService()
@@ -120,5 +126,8 @@ async def run_analysis(
     return AnalysisResponse(
         analysis=result.summary,
         tool_summaries=result.tool_summaries,
-        images=result.tool_images,
+        images={
+            name: [ImageResponse(**image.asdict()) for image in images]
+            for name, images in result.tool_images.items()
+        },
     )

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import List
 
-from app.services.models import ToolResult
+from app.services.models import ImagePayload, ToolResult
 from app.services.preprocess import PriceMatrix
-from app.services.visuals import figure_to_url, plot_lines
+from app.services.visuals import figure_to_payload, plot_lines
 
 
 def _simple_moving_average(values: List[float], window: int) -> List[float]:
@@ -22,7 +22,7 @@ def analyze_sma(data: PriceMatrix, windows: tuple[int, int] = (20, 50)) -> ToolR
 
     short_window, long_window = windows
     summaries: list[str] = []
-    images: list[str] = []
+    images: list[ImagePayload] = []
 
     for ticker in data.tickers:
         prices = data.series[ticker]
@@ -39,7 +39,7 @@ def analyze_sma(data: PriceMatrix, windows: tuple[int, int] = (20, 50)) -> ToolR
             title=f"{ticker} Close with SMAs",
             y_label="Price",
         )
-        images.append(figure_to_url(figure))
+        images.append(figure_to_payload(figure))
 
         if short_ma[-1] > long_ma[-1]:
             summaries.append(f"{ticker}: bullish crossover ({short_window}>{long_window}).")

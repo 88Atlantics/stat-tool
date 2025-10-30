@@ -6,7 +6,7 @@ from typing import List
 
 from app.services.models import ToolResult
 from app.services.preprocess import PriceMatrix
-from app.services.visuals import figure_to_url, plot_heatmap, plot_lines
+from app.services.visuals import figure_to_payload, plot_heatmap, plot_lines
 
 
 def analyze_zscore(data: PriceMatrix) -> ToolResult:
@@ -51,7 +51,7 @@ def analyze_zscore(data: PriceMatrix) -> ToolResult:
                 matrix[i][j] = -latest_scores[(right, left)]
 
     heatmap_fig = plot_heatmap(matrix, tickers, "Latest Pairwise Z-Scores")
-    heatmap_url = figure_to_url(heatmap_fig)
+    heatmap_payload = figure_to_payload(heatmap_fig)
 
     most_extreme_pair = max(latest_scores.items(), key=lambda item: abs(item[1]))[0]
     z_series = zscore_history[most_extreme_pair]
@@ -62,11 +62,15 @@ def analyze_zscore(data: PriceMatrix) -> ToolResult:
         y_label="Z-Score",
         horizontal_lines=[(0, "#555555"), (2, "#d62728"), (-2, "#2ca02c")],
     )
-    line_chart_url = figure_to_url(line_chart_fig)
+    line_chart_payload = figure_to_payload(line_chart_fig)
 
     summary = (
         f"Largest divergence observed for {most_extreme_pair[0]} vs {most_extreme_pair[1]} "
         f"(z-score {latest_scores[most_extreme_pair]:.2f})."
     )
 
-    return ToolResult(name="zscore", summary=summary, images=[heatmap_url, line_chart_url])
+    return ToolResult(
+        name="zscore",
+        summary=summary,
+        images=[heatmap_payload, line_chart_payload],
+    )
