@@ -188,6 +188,7 @@ def parse_uploaded_prices(
     if not fallback_symbol and filename:
         fallback_symbol = _derive_ticker_from_filename(filename)
     records: List[RawRecord] = []
+    auto_symbol: str | None = fallback_symbol
     for row in reader:
         date_value = row.get("Date") or row.get("date")
         ticker_value = (
@@ -195,11 +196,15 @@ def parse_uploaded_prices(
             or row.get("ticker")
             or row.get("Symbol")
             or row.get("symbol")
-            or fallback_symbol
+            or auto_symbol
         )
         close_value = row.get("Close") or row.get("close") or row.get("Adj Close")
-        if not date_value or not ticker_value or close_value in (None, ""):
+        if not date_value or close_value in (None, ""):
             continue
+        if not ticker_value:
+            if auto_symbol is None:
+                auto_symbol = "UPLOAD"
+            ticker_value = auto_symbol
         records.append(
             {
                 "Date": date_value,
