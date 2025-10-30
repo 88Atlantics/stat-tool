@@ -3,5 +3,6 @@ fastapi
 httpx
 matplotlib
 openai
+python-multipart
 pytest
 uvicorn

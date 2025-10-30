@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Optional, Union
+from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -48,7 +48,7 @@ async def run_analysis(
     end_date: Optional[str] = Form(
         default=None, description="Optional end date in YYYY-MM-DD format"
     ),
-    upload_file: Union[UploadFile, str, None] = File(
+    upload_file: UploadFile | None = File(
         None, description="optional file upload"
     ),
 ) -> AnalysisResponse:
