@@ -83,7 +83,7 @@ async def run_analysis(
         fallback_tickers.extend(request.tickers)
     else:
         fallback_tickers.extend(plan.tickers)
-    if isinstance(upload_file, UploadFile):
+    if upload_file and upload_file.filename:
         file_bytes = await upload_file.read()
         raw_records.extend(
             parse_uploaded_prices(
