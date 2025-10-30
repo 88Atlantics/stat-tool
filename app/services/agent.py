@@ -8,9 +8,9 @@ import re
 import textwrap
 from typing import Callable, Sequence
 
-try:  # pragma: no cover - network interactions excluded from tests
+try:  # pragma: no cover - optional dependency for local development
     from openai import OpenAI
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:  # pragma: no cover - the service still runs without LLM access
     OpenAI = None  # type: ignore[assignment]
 
 from app.services.models import AgentResult, QueryPlan, ToolResult
@@ -20,7 +20,7 @@ from app.tools import rsi, sma, zscore
 
 ToolFn = Callable[[PriceMatrix], ToolResult]
 
-_ENGLISH_NUMBER_MAP = {
+_NUMBER_WORDS: dict[str, int] = {
     "one": 1,
     "two": 2,
     "three": 3,
@@ -35,25 +35,9 @@ _ENGLISH_NUMBER_MAP = {
     "twelve": 12,
 }
 
-_CHINESE_DIGIT_MAP = {
-    "零": 0,
-    "〇": 0,
-    "一": 1,
-    "二": 2,
-    "两": 2,
-    "三": 3,
-    "四": 4,
-    "五": 5,
-    "六": 6,
-    "七": 7,
-    "八": 8,
-    "九": 9,
-    "十": 10,
-}
-
 
 class AgentService:
-    """Simple rule-based agent that dispatches statistical tools."""
+    """Interpret natural-language queries and orchestrate analytics tools."""
 
     def __init__(self, llm_client: object | None = None) -> None:
         self._tool_map: dict[str, ToolFn] = {
@@ -64,18 +48,18 @@ class AgentService:
         self._llm_client = llm_client or self._build_llm_client()
         self._keyword_ticker_map: dict[str, str] = {
             "apple": "AAPL",
-            "苹果": "AAPL",
             "tesla": "TSLA",
-            "特斯拉": "TSLA",
             "microsoft": "MSFT",
-            "微软": "MSFT",
         }
 
+    # ------------------------------------------------------------------
+    # Date helpers
+    # ------------------------------------------------------------------
     def _build_llm_client(self) -> object | None:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key or OpenAI is None:
             return None
-        try:  # pragma: no cover - network client initialisation
+        try:  # pragma: no cover - creating the remote client is not unit tested
             return OpenAI(api_key=api_key)
         except Exception:
             return None
@@ -84,7 +68,8 @@ class AgentService:
         return dt.date.today()
 
     def current_date(self) -> dt.date:
-        """Expose today's date for coordination with other components."""
+        """Expose the agent's notion of "today" for other services (tests patch this)."""
+
         return self._today()
 
     def _months_ago(self, reference: dt.date, months: int) -> dt.date:
@@ -100,6 +85,9 @@ class AgentService:
         reference = end_date or self.current_date()
         return self._months_ago(reference, months)
 
+    # ------------------------------------------------------------------
+    # Parsing utilities
+    # ------------------------------------------------------------------
     def _parse_tool_selection(self, text: str) -> Sequence[str]:
         try:
             payload = json.loads(text)
@@ -111,12 +99,13 @@ class AgentService:
             items = payload
         else:
             return []
+
         names: list[str] = []
         for item in items:
             if isinstance(item, str) and item in self._tool_map:
                 names.append(item)
             elif isinstance(item, dict):
-                candidate = item.get("tool") if isinstance(item, dict) else None
+                candidate = item.get("tool")
                 if isinstance(candidate, str) and candidate in self._tool_map:
                     names.append(candidate)
         return names
@@ -138,69 +127,35 @@ class AgentService:
             return []
         return [value]
 
-    def _parse_chinese_numeral(self, token: str) -> int | None:
-        if not token:
-            return None
-        if token == "十":
-            return 10
-        if token.endswith("十") and len(token) == 2:
-            leading = _CHINESE_DIGIT_MAP.get(token[0])
-            if leading is None:
-                return None
-            return leading * 10
-        if "十" in token:
-            prefix, suffix = token.split("十", 1)
-            prefix_value = 1 if prefix == "" else _CHINESE_DIGIT_MAP.get(prefix)
-            suffix_value = 0 if suffix == "" else _CHINESE_DIGIT_MAP.get(suffix)
-            if prefix_value is None or suffix_value is None:
-                return None
-            return prefix_value * 10 + suffix_value
-        value = 0
-        for char in token:
-            digit = _CHINESE_DIGIT_MAP.get(char)
-            if digit is None:
-                return None
-            value = value * 10 + digit
-        return value
-
     def _parse_numeric_token(self, token: str) -> int | None:
         cleaned = token.strip().lower()
         if not cleaned:
             return None
         if cleaned.isdigit():
             return int(cleaned)
-        if cleaned in _ENGLISH_NUMBER_MAP:
-            return _ENGLISH_NUMBER_MAP[cleaned]
+        if cleaned in _NUMBER_WORDS:
+            return _NUMBER_WORDS[cleaned]
         if cleaned in {"half", "half-year", "half year"}:
             return 6
-        chinese_value = self._parse_chinese_numeral(token.strip())
-        if chinese_value is not None:
-            return chinese_value
         return None
 
     def _subtract_period(self, end_date: dt.date, quantity: int, unit: str) -> dt.date | None:
         if quantity <= 0:
             return None
         normalized = unit.lower()
-        if normalized.startswith("day"):
+        if normalized.startswith("day") or normalized == "d":
             return end_date - dt.timedelta(days=quantity)
-        if normalized.startswith("week"):
+        if normalized.startswith("week") or normalized in {"w", "wk", "wks"}:
             return end_date - dt.timedelta(weeks=quantity)
-        if normalized.startswith("month"):
+        if normalized.startswith("month") or normalized in {"m", "mo", "mos"}:
             return self._months_ago(end_date, quantity)
-        if normalized.startswith("year"):
+        if normalized.startswith("year") or normalized in {"y", "yr", "yrs"}:
             return self._months_ago(end_date, quantity * 12)
-        if normalized in {"m", "mo", "mos"}:
-            return self._months_ago(end_date, quantity)
-        if normalized in {"y", "yr", "yrs"}:
-            return self._months_ago(end_date, quantity * 12)
-        if normalized in {"w", "wk", "wks"}:
-            return end_date - dt.timedelta(weeks=quantity)
-        if normalized in {"d"}:
-            return end_date - dt.timedelta(days=quantity)
         return None
 
-    def _interpret_relative_window(self, value: object, default_end: dt.date | None = None) -> tuple[dt.date | None, dt.date | None]:
+    def _interpret_relative_window(
+        self, value: object, default_end: dt.date | None = None
+    ) -> tuple[dt.date | None, dt.date | None]:
         end_date = default_end or self._today()
         quantity: int | None = None
         unit: str | None = None
@@ -209,12 +164,13 @@ class AgentService:
             unit = str(value.get("unit", "")).lower()
         elif isinstance(value, str):
             match = re.search(
-                r"(?P<quantity>\d+|[A-Za-z\u4e00-\u9fa5两半]+)\s*(?P<unit>years?|yrs?|y|months?|mos?|m|weeks?|wks?|w|days?|d)",
+                r"(?P<quantity>\d+|[a-z]+)\s*(?P<unit>years?|yrs?|y|months?|mos?|m|weeks?|wks?|w|days?|d)",
                 value.lower(),
             )
             if match:
                 quantity = self._parse_numeric_token(match.group("quantity"))
                 unit = match.group("unit")
+
         if quantity and unit:
             start_date = self._subtract_period(end_date, quantity, unit)
             if start_date:
@@ -224,8 +180,9 @@ class AgentService:
     def _extract_relative_period(self, query: str) -> tuple[dt.date | None, dt.date | None]:
         lowered = query.lower()
         today = self._today()
+
         english_match = re.search(
-            r"(?:past|last|trailing)\s+(?P<quantity>\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?P<unit>day|days|week|weeks|month|months|year|years)",
+            r"(?:past|last|trailing)\s+(?P<quantity>\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|half)\s+(?P<unit>day|days|week|weeks|month|months|year|years)",
             lowered,
         )
         if english_match:
@@ -236,41 +193,22 @@ class AgentService:
                 if start:
                     return start, today
 
-        simple_match = re.search(r"(?P<quantity>\d+)(?P<unit>y|yr|yrs|m|mo|mos|w|wk|wks|d)", lowered)
-        if simple_match:
-            quantity = self._parse_numeric_token(simple_match.group("quantity"))
-            unit = simple_match.group("unit")
+        shorthand_match = re.search(r"(?P<quantity>\d+)(?P<unit>y|yr|yrs|m|mo|mos|w|wk|wks|d)", lowered)
+        if shorthand_match:
+            quantity = self._parse_numeric_token(shorthand_match.group("quantity"))
+            unit = shorthand_match.group("unit")
             if quantity and unit:
                 start = self._subtract_period(today, quantity, unit)
                 if start:
                     return start, today
 
-        chinese_match = re.search(r"过去(?P<quantity>[\u4e00-\u9fa5两半\d]+)(?P<unit>年|个月|月|周|星期|天|日)", query)
-        if chinese_match:
-            quantity = self._parse_numeric_token(chinese_match.group("quantity"))
-            unit = chinese_match.group("unit")
-            unit_map = {
-                "年": "year",
-                "个月": "month",
-                "月": "month",
-                "周": "week",
-                "星期": "week",
-                "天": "day",
-                "日": "day",
-            }
-            mapped_unit = unit_map.get(unit, unit)
-            if quantity and mapped_unit:
-                start = self._subtract_period(today, quantity, mapped_unit)
-                if start:
-                    return start, today
-
-        if "过去半年" in query:
-            start = self._subtract_period(today, 6, "month")
+        if "last year" in lowered or "past year" in lowered:
+            start = self._subtract_period(today, 1, "year")
             if start:
                 return start, today
 
-        if "过去一年" in query or "last year" in lowered or "past year" in lowered:
-            start = self._subtract_period(today, 1, "year")
+        if "last half" in lowered or "past half" in lowered:
+            start = self._subtract_period(today, 6, "month")
             if start:
                 return start, today
 
@@ -283,6 +221,7 @@ class AgentService:
             if word.lower() in self._tool_map:
                 continue
             tickers.append(word.upper())
+
         lowered = query.lower()
         for keyword, symbol in self._keyword_ticker_map.items():
             if keyword in lowered:
@@ -295,6 +234,7 @@ class AgentService:
         for name in self._tool_map:
             if name in lowered:
                 tools.append(name)
+
         if not tools:
             if "moving average" in lowered or "sma" in lowered:
                 tools.append("sma")
@@ -302,11 +242,19 @@ class AgentService:
                 tools.append("rsi")
             if "z-score" in lowered or "z score" in lowered or "zscore" in lowered:
                 tools.append("zscore")
+
         if not tools:
             tools = list(self._tool_map.keys())
+
         start_date, end_date = self._extract_relative_period(query)
         tickers = self._extract_tickers(query)
-        return QueryPlan(tools=tuple(dict.fromkeys(tools)), tickers=tuple(tickers), start_date=start_date, end_date=end_date)
+
+        return QueryPlan(
+            tools=tuple(dict.fromkeys(tools)),
+            tickers=tuple(tickers),
+            start_date=start_date,
+            end_date=end_date,
+        )
 
     def _resolve_tools(self, names: Sequence[str] | None) -> list[tuple[str, ToolFn]]:
         if not names:
@@ -324,9 +272,9 @@ class AgentService:
 
         prompt = textwrap.dedent(
             f"""
-            You act as a planner for an investment statistics agent.
+            You are a planning assistant for an investment statistics service.
             Available analytics tools: {', '.join(self._tool_map.keys())}.
-            Return a strict JSON object using the schema:
+            Respond with strict JSON shaped as:
             {{
                 "tools": [tool_names...],
                 "tickers": [ticker_symbols...],
@@ -334,15 +282,15 @@ class AgentService:
                 "end_date": "YYYY-MM-DD" | null,
                 "lookback": {{"quantity": <int>, "unit": "day/week/month/year"}} | null
             }}
-            - Tool names must come from the available list only.
+            - Tool names must come from the provided list only.
             - Ticker symbols must be upper-case.
-            - If the user specifies a relative timeframe (e.g. last six months), express it via the lookback object.
-            - Omit fields that are not specified by the user by setting them to null.
+            - Capture relative timeframes (e.g. "last six months") inside the lookback object.
+            - Set any unspecified field to null.
             User query: "{query}".
             """
         ).strip()
 
-        try:  # pragma: no cover - exercised via network
+        try:  # pragma: no cover - exercised via integration tests with a real client
             response = self._llm_client.responses.create(
                 model="gpt-5",
                 input=[
@@ -372,6 +320,7 @@ class AgentService:
             for item in self._ensure_sequence(payload.get("tickers"))
             if isinstance(item, (str, bytes)) and str(item).strip()
         ]
+
         start_date = self._parse_date(payload.get("start_date"))
         end_date = self._parse_date(payload.get("end_date"))
         if payload.get("lookback") and not start_date:
@@ -386,6 +335,9 @@ class AgentService:
             end_date=end_date,
         )
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
     def interpret_query(self, query: str) -> QueryPlan:
         heuristic_plan = self._keyword_plan(query)
         llm_plan = self._interpret_with_llm(query)

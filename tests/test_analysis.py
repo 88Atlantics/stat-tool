@@ -117,7 +117,7 @@ def test_missing_data_returns_error():
 
 def test_uploaded_file_without_ticker_is_used():
     csv_payload = _csv_without_ticker()
-    result = _invoke_run_analysis("苹果过去六个月的sma", csv_payload=csv_payload)
+    result = _invoke_run_analysis("Apple last six months sma", csv_payload=csv_payload)
     assert "sma" in result.tool_summaries
     assert result.images["sma"]
 
