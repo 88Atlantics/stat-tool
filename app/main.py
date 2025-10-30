@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.routers.analysis import router as analysis_router
 
@@ -12,6 +15,9 @@ def create_app() -> FastAPI:
         ),
         version="0.1.0",
     )
+    static_root = Path(__file__).resolve().parent / "static"
+    static_root.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=static_root), name="static")
     app.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
 
     @app.get("/")

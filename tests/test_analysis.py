@@ -36,6 +36,25 @@ def _csv_without_ticker() -> str:
     return "\n".join(rows)
 
 
+def _csv_price_only_headers() -> str:
+    base_date = dt.date(2024, 3, 1)
+    rows = ["date,close,high,low,open,volume"]
+    for i in range(5):
+        rows.append(
+            ",".join(
+                [
+                    (base_date + dt.timedelta(days=i)).isoformat(),
+                    str(200 + i),
+                    str(205 + i),
+                    str(195 + i),
+                    str(198 + i),
+                    str(1000 + i),
+                ]
+            )
+        )
+    return "\n".join(rows)
+
+
 def _market_records(ticker: str, start: dt.date, days: int = 60) -> list[dict[str, object]]:
     return [
         {"Date": start + dt.timedelta(days=i), "Ticker": ticker, "Close": 200 + i}
@@ -83,7 +102,11 @@ def test_analysis_endpoint_returns_results():
     )
     assert set(result.tool_summaries.keys()) == {"zscore", "rsi", "sma"}
     for images in result.images.values():
-        assert all(isinstance(img, str) and len(img) > 10 for img in images)
+        assert all(isinstance(img, str) for img in images)
+        assert all(
+            img.startswith("/static/visuals/") or img.startswith("http")
+            for img in images
+        )
 
 
 def test_missing_data_returns_error():
@@ -99,6 +122,16 @@ def test_uploaded_file_without_ticker_is_used():
     assert result.images["sma"]
 
 
+def test_price_only_headers_are_accepted():
+    csv_payload = _csv_price_only_headers()
+    result = _invoke_run_analysis("Please compute sma", csv_payload=csv_payload)
+    assert "sma" in result.tool_summaries
+    assert all(
+        image.startswith("/static/visuals/") or image.startswith("http")
+        for image in result.images["sma"]
+    )
+
+
 def test_real_aapl_csv_is_parsed():
     csv_path = pathlib.Path(__file__).with_name("AAPL.csv")
     payload = csv_path.read_bytes()
@@ -111,7 +144,10 @@ def test_real_aapl_csv_is_parsed():
         filename="AAPL.csv",
     )
     assert "sma" in result.tool_summaries
-    assert result.images["sma"]
+    assert all(
+        image.startswith("/static/visuals/") or image.startswith("http")
+        for image in result.images["sma"]
+    )
 
 
 def test_query_without_ticker_loads_market_data(monkeypatch):
@@ -132,3 +168,30 @@ def test_query_without_ticker_loads_market_data(monkeypatch):
     assert captured["start"] == dt.date(2024, 1, 1)
     assert captured["end"] == dt.date(2024, 7, 1)
     assert "sma" in result.tool_summaries
+    assert all(
+        image.startswith("/static/visuals/") or image.startswith("http")
+        for image in result.images["sma"]
+    )
+
+
+def test_static_base_url_prefix(monkeypatch):
+    monkeypatch.setenv("PUBLIC_STATIC_BASE_URL", "https://cdn.example.com")
+    try:
+        result = _invoke_run_analysis("Please compute sma", csv_payload=_csv_without_ticker())
+        assert result.images["sma"]
+        assert all(
+            image.startswith("https://cdn.example.com/static/visuals/")
+            for image in result.images["sma"]
+        )
+    finally:
+        monkeypatch.delenv("PUBLIC_STATIC_BASE_URL", raising=False)
+
+
+def test_local_static_path_used_when_base_url_absent(monkeypatch):
+    monkeypatch.delenv("PUBLIC_STATIC_BASE_URL", raising=False)
+    result = _invoke_run_analysis("Please compute sma", csv_payload=_csv_without_ticker())
+    assert result.images["sma"]
+    assert all(
+        image.startswith("/static/visuals/")
+        for image in result.images["sma"]
+    )
