@@ -3,8 +3,9 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import re
 from dataclasses import dataclass
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Sequence
 
 
 @dataclass
@@ -76,7 +77,17 @@ def clean_stock_data(records: Iterable[RawRecord]) -> PriceMatrix:
     return PriceMatrix(dates=filtered_dates, series=filtered_series)
 
 
-def parse_uploaded_prices(content: bytes, filename: str | None = None) -> List[RawRecord]:
+def _derive_ticker_from_filename(filename: str) -> str | None:
+    stem = filename.rsplit(".", 1)[0]
+    candidate = re.sub(r"[^A-Za-z0-9]+", "", stem)
+    return candidate.upper() if candidate else None
+
+
+def parse_uploaded_prices(
+    content: bytes,
+    filename: str | None = None,
+    fallback_tickers: Sequence[str] | None = None,
+) -> List[RawRecord]:
     if not content:
         return []
 
@@ -93,14 +104,34 @@ def parse_uploaded_prices(content: bytes, filename: str | None = None) -> List[R
         except Exception:
             pass
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+    fallback_symbols = [
+        str(symbol).strip().upper()
+        for symbol in (fallback_tickers or [])
+        if isinstance(symbol, (str, bytes)) and str(symbol).strip()
+    ]
+    fallback_symbol = fallback_symbols[0] if fallback_symbols else None
+    if not fallback_symbol and filename:
+        fallback_symbol = _derive_ticker_from_filename(filename)
     records: List[RawRecord] = []
     for row in reader:
         date_value = row.get("Date") or row.get("date")
-        ticker_value = row.get("Ticker") or row.get("ticker")
+        ticker_value = (
+            row.get("Ticker")
+            or row.get("ticker")
+            or row.get("Symbol")
+            or row.get("symbol")
+            or fallback_symbol
+        )
         close_value = row.get("Close") or row.get("close") or row.get("Adj Close")
         if not date_value or not ticker_value or close_value in (None, ""):
             continue
-        records.append({"Date": date_value, "Ticker": ticker_value, "Close": close_value})
+        records.append(
+            {
+                "Date": date_value,
+                "Ticker": str(ticker_value).strip().upper(),
+                "Close": close_value,
+            }
+        )
 
     if not records and filename and filename.lower().endswith(".json"):
         try:
@@ -111,10 +142,22 @@ def parse_uploaded_prices(content: bytes, filename: str | None = None) -> List[R
                 for item in parsed:
                     if isinstance(item, dict):
                         date_value = item.get("Date") or item.get("date")
-                        ticker_value = item.get("Ticker") or item.get("ticker")
+                        ticker_value = (
+                            item.get("Ticker")
+                            or item.get("ticker")
+                            or item.get("Symbol")
+                            or item.get("symbol")
+                            or fallback_symbol
+                        )
                         close_value = item.get("Close") or item.get("close")
                         if date_value and ticker_value and close_value is not None:
-                            records.append({"Date": date_value, "Ticker": ticker_value, "Close": close_value})
+                            records.append(
+                                {
+                                    "Date": date_value,
+                                    "Ticker": str(ticker_value).strip().upper(),
+                                    "Close": close_value,
+                                }
+                            )
         except Exception:
             return []
 

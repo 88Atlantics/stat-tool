@@ -76,15 +76,32 @@ async def run_analysis(
         start_date=_parse_date(start_date, "start_date"),
         end_date=_parse_date(end_date, "end_date"),
     )
+    plan = agent_service.interpret_query(request.query)
     raw_records: list[dict[str, object]] = []
+    fallback_tickers: list[str] = []
+    if request.tickers:
+        fallback_tickers.extend(request.tickers)
+    else:
+        fallback_tickers.extend(plan.tickers)
     if isinstance(upload_file, UploadFile):
         file_bytes = await upload_file.read()
-        raw_records.extend(parse_uploaded_prices(file_bytes, upload_file.filename))
-    if not raw_records and request.tickers:
+        raw_records.extend(
+            parse_uploaded_prices(
+                file_bytes,
+                upload_file.filename,
+                fallback_tickers=fallback_tickers,
+            )
+        )
+    derived_tickers = request.tickers or list(plan.tickers)
+    if not raw_records and derived_tickers:
+        derived_end = request.end_date or plan.end_date or agent_service.current_date()
+        derived_start = request.start_date or plan.start_date
+        if derived_start is None:
+            derived_start = agent_service.default_lookback(12, derived_end)
         raw_records = load_market_data(
-            tickers=request.tickers,
-            start=request.start_date,
-            end=request.end_date,
+            tickers=derived_tickers,
+            start=derived_start,
+            end=derived_end,
         )
         if not raw_records:
             raise HTTPException(status_code=404, detail="No market data available for the requested tickers")
@@ -98,7 +115,7 @@ async def run_analysis(
     if cleaned.is_empty():
         raise HTTPException(status_code=422, detail="Unable to clean the provided stock data")
 
-    result = agent_service.run_analysis(request.query, cleaned)
+    result = agent_service.run_analysis(request.query, cleaned, plan=plan)
 
     return AnalysisResponse(
         analysis=result.summary,
